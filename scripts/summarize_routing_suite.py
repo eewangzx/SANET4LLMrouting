@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-LABELS={'proposed':'Proposed','greedy':'Current-state Greedy',
+LABELS={'proposed':'Proposed','greedy':'Latency-Only Myopic',
         'random':'Random','shortest_queue':'Shortest Queue'}
 COLORS={'proposed':'#3070B3','greedy':'#DD8A36','random':'#9C596F','shortest_queue':'#45957C'}
 

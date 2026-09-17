@@ -148,6 +148,12 @@ class RoutingEnvironment(Simulator):
         self._advance_until_decision()
         reward = self._reward_acc
         self._reward_acc = 0.0
+        if getattr(self, "fast_step", False):
+            # Training fast path: the per-step observation dict and SLA tally are
+            # never read by the learners; skipping them saves ~20% rollout time.
+            return None, reward, self.terminated, False, {
+                "elapsed_ms": self.now - start_now, "raw_sla_reward": reward,
+                "episode_time_ms": self.now}
         info = {
             "elapsed_ms": self.now - start_now,
             "raw_sla_reward": reward,

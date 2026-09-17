@@ -47,6 +47,7 @@ class JointRoutingAgent(DoubleDQNAgent):
         self.route_cost_state=False
         self.global_return=False
         self.budget_state=False
+        self.deadline_layout=None
         self._episode_utilities=[]
         self.parameters=list(self.online.parameters())+(list(self.codec.parameters()) if train_codec else [])
         self.opt=torch.optim.Adam(self.parameters,lr=lr)
@@ -69,6 +70,14 @@ class JointRoutingAgent(DoubleDQNAgent):
             pressure,costs=forecast_costs(decoded,[o[2] for o in observations],codec.sample_ms)
             start=nodes*codec.latent_dim
             state=torch.cat((state[:,:start+nodes],pressure,costs,state[:,start+3*nodes:]),dim=-1)
+            if self.deadline_layout is not None:
+                # Recompute the deadline-aware prior block from the recomputed
+                # forecast costs so that codec gradients also flow through it.
+                from edge_msd.realtime_routing.dynamic_routing import deadline_prior
+                ps,bi,di=self.deadline_layout
+                deployed=torch.as_tensor(np.stack([o[2]['deployed'] for o in observations]),device=self.device)
+                prior,doomed=deadline_prior(costs,state[:,start:start+nodes],state[:,bi],deployed)
+                state=torch.cat((state[:,:ps],prior,state[:,bi:bi+1],doomed[:,None],state[:,di+1:]),dim=-1)
         targets=None
         if labels:
             target_empty=np.zeros((codec.horizon,codec.targets),np.float32)

@@ -1,4 +1,4 @@
-"""Main experiment: jointly trained proposed versus traditional greedy."""
+"""Joint predictive routing versus explicitly defined routing baselines."""
 from collections import Counter, deque
 from dataclasses import asdict
 import argparse
@@ -101,7 +101,8 @@ def collect(env,agent=None,epsilon=0.,buffer=None,n_step=3,policy='greedy'):
 
 def main():
     p=argparse.ArgumentParser()
-    p.add_argument('--bench',choices=['proposed','decoded_separate','greedy','random','shortest_queue'],required=True)
+    p.add_argument('--bench',choices=['proposed','decoded_separate','latency_only','greedy','random','shortest_queue'],required=True,
+                   help='latency_only is cost-unaware myopic routing; greedy is its legacy alias')
     p.add_argument('--algorithm',choices=['dqn','ppo'],default='dqn')
     p.add_argument('--ppo-epochs',type=int,default=4)
     p.add_argument('--ppo-batch-size',type=int,default=256)
@@ -146,6 +147,9 @@ def main():
     p.add_argument('--exclude-initial-selection',action='store_true')
     p.add_argument('--seed',type=int,default=7)
     p.add_argument('--epsilon-start',type=float,default=1.)
+    p.add_argument('--deadline-aware-prior',action='store_true',
+                   help='requests predicted to exceed the heuristic remaining time budget are steered to the most loaded node; requires --predictive-cost-prior')
+    p.add_argument('--buffer-cap',type=int,default=0,help='keep only the newest transitions (0: unbounded replay)')
     args=p.parse_args()
     learned=args.bench in ('proposed','decoded_separate')
     separate=args.bench=='decoded_separate'
@@ -172,6 +176,8 @@ def main():
         p.error('average-budget training uses joint DQN and queue-weighted resource cost, without a fixed resource weight')
     if not math.isfinite(args.route_residual_bound) or args.route_residual_bound<0:
         p.error('route residual bound must be finite and nonnegative')
+    if args.deadline_aware_prior and (not args.predictive_cost_prior or separate):
+        p.error('--deadline-aware-prior requires --predictive-cost-prior on the joint proposed method')
     if args.exclude_initial_selection and not args.validation_seeds:
         p.error('--exclude-initial-selection requires validation seeds')
     torch.set_num_threads(1);torch.set_num_interop_threads(1)
@@ -194,14 +200,15 @@ def main():
                  state_representation='forecast' if separate else 'latent',
                  include_route_costs=bool(args.resource_cost_weight or args.data_cost_weight or args.average_resource_budget),
                  average_resource_budget=args.average_resource_budget,dpp_v=args.dpp_v,
-                 data_cost_weight=args.data_cost_weight)
+                 data_cost_weight=args.data_cost_weight,deadline_aware=args.deadline_aware_prior)
     root=args.output;root.mkdir(parents=True,exist_ok=True)
     started=time.perf_counter()
     def write(name,value):
         tmp=root/(name+'.tmp');tmp.write_text(json.dumps(value,indent=2,allow_nan=False));tmp.replace(root/name)
     write('status.json',{'status':'running','stage':'setup'})
     example=world(52000,split='train');state,mask=example.state()
-    train_seeds=list(range(args.train_seed_base,args.train_seed_base+args.episodes))
+    train_seeds=(list(range(args.train_seed_base,args.train_seed_base+args.episodes))
+                 if learned else [])
     test_seeds=[int(s) for s in args.test_seeds.split(',')]
     validation_seeds=[int(s) for s in args.validation_seeds.split(',') if s]
     if args.validate_every<=0:
@@ -256,6 +263,13 @@ def main():
            Path('edge_msd/realtime_routing/ppo_agent.py'),
            Path('edge_msd/realtime_routing/forecast_costs.py'),
            Path('edge_msd/realtime_routing/dynamic_routing.py'))}}
+    if args.bench in ('latency_only','greedy'):
+        manifest['method_name']='Latency-Only Myopic (LOM)'
+        manifest['baseline_definition']={
+            'decision':'minimum estimated current stage completion time, including transfer and per-instance backlog',
+            'information':'latest delivered raw current measurements and the dispatch/completion ledger',
+            'prediction':False,'resource_cost_considered':False,'data_cost_considered':False,
+            'average_budget_considered':False,'oracle':False}
     if not (args.resource_cost_weight or args.data_cost_weight or args.average_resource_budget):
         manifest['state_fields']=[name for name in manifest['state_fields']
                                   if name not in ('incremental_resource_cost','incremental_data_cost')]
@@ -327,17 +341,25 @@ def main():
             for net in (agent.online,agent.target):
                 net.route_cost_start=len(example.node_ids)*(report_state_dim+2)
                 net.route_residual_bound=args.route_residual_bound or None
+            if args.deadline_aware_prior:
+                layout=tuple(len(state)+index for index in example.deadline_layout())
+                agent.deadline_layout=layout
+                for net in (agent.online,agent.target):net.route_cost_start=layout[0]
+                manifest['deadline_aware_prior']=('predicted slack = remaining deadline - heuristic unfinished processing work - '
+                    'fastest predicted stage latency; if negative the prior steers to the most loaded legal node')
+                manifest['state_fields']=[*manifest['state_fields'][:-2],'deadline_prior_cost','deadline_budget','doomed',*manifest['state_fields'][-2:]]
             if separate or args.fresh_q or (args.algorithm=='ppo' and not matching and not args.ppo_warm_start):
                 for head in (agent.online.value,agent.online.advantage):
                     torch.nn.init.zeros_(head.weight);torch.nn.init.zeros_(head.bias)
                 agent.target.load_state_dict(agent.online.state_dict())
-            manifest['q_parameterization']=f'sigmoid of state value + {residual} - 2 * predicted stage latency / 50ms'
+            prior_description='deadline-aware routing prior' if args.deadline_aware_prior else 'predicted stage latency / 50ms'
+            manifest['q_parameterization']=f'sigmoid of state value + {residual} - 2 * {prior_description}'
         if args.algorithm=='ppo':
             manifest.pop('q_parameterization',None)
             manifest.update(critic='sigmoid state value with Monte Carlo terminal SLA targets and MSE',
                 n_step=None,
                 training='clipped PPO surrogate + 0.5 value MSE - 0.001 entropy + weighted forecast/budget',
-                policy_parameterization=f'masked softmax of ({residual} - 2*forecast stage latency/50ms)/temperature',
+                policy_parameterization=f'masked softmax of ({residual} - 2*{prior_description})/temperature' if args.predictive_cost_prior else 'masked learned action logits / temperature',
                 ppo_clip_ratio=.2,ppo_temperature=args.ppo_temperature,ppo_epochs=args.ppo_epochs,
                 ppo_batch_size=args.ppo_batch_size,trajectory_return='same-request terminal success, gamma=1 lambda=1',
                 replay='current episode only; fixed old log-probabilities and advantages')
@@ -371,7 +393,7 @@ def main():
             reward='0.5*system SLA +/-1 settlements - (Q_before/V)*budget_increment - data_weight*incremental normalized MB-hop',
             budget_accounting='credit only for dispatched stages; full DAG credits sum to one request budget; no credit for un-dispatched pending work',
             model_selection='validation budget feasibility first, then SLA-minus-data objective; least violation if no feasible checkpoint; initial checkpoint excluded',
-            q_parameterization=(f'state value + {residual} - predicted stage latency prior'
+            q_parameterization=(f'state value + {residual} - 2 * {prior_description}'
                 if learned and args.predictive_cost_prior else
                 ('state value + action advantage' if learned else 'no Q network; fixed heuristic policy')),
             state_fields=[*manifest['state_fields'],'cost_virtual_queue_divided_by_V'])
@@ -448,6 +470,7 @@ def main():
                 epsilon=0.;reward,decisions,rollout=collect_ppo(env,agent)
             else:
                 reward,decisions=collect(env,agent,epsilon,buffer,args.n_step)
+                if args.buffer_cap and len(buffer)>args.buffer_cap:del buffer[:len(buffer)-args.buffer_cap]
             diagnostics=env.diagnostics();write(f'train_{episode:02d}.json',diagnostics)
             if args.algorithm=='ppo':
                 for _ in range(args.ppo_epochs):

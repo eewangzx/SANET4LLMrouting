@@ -32,6 +32,28 @@ def capacity_rank_resource_prices(scenario, low=3., high=10.):
     return {node:float(low+(high-low)*value) for node,value in zip(nodes,normalized)}
 
 
+def deadline_prior(costs, backlog, budget, deployed, beta=1., tie=.02):
+    """Deadline-aware routing prior; the routing preference is argmin over nodes.
+
+    ``costs``: received-forecast stage latency / 50 ms per node; ``backlog``:
+    log1p(jobs per instance)/3 per node; ``budget``: (remaining deadline minus
+    heuristic remaining-DAG work) / 50 ms. When the fastest predicted deployed
+    node exceeds this budget (``budget < min cost``), classify the request as
+    deadline-risky and steer it to the most loaded legal node to preserve less
+    congested nodes for other requests. This is a heuristic risk estimate, not
+    a proof of deadline infeasibility. Works on numpy arrays and torch
+    tensors alike (batched: costs/backlog/deployed [B,N], budget [B]).
+    """
+    if hasattr(costs,'masked_fill'):
+        minimum=costs.masked_fill(~deployed,float('inf')).min(-1).values
+        doomed=(budget<minimum)[...,None]
+        dump=-beta*backlog+tie*costs
+        return costs*(~doomed)+dump*doomed,doomed[...,0].to(costs.dtype)
+    minimum=np.where(deployed,costs,np.inf).min()
+    doomed=bool(budget<minimum)
+    return (-beta*backlog+tie*costs if doomed else costs).astype(np.float32),np.float32(doomed)
+
+
 class CurrentMeasurementCodec:
     """Traditional controller reports current float32 measurements verbatim."""
     name = 'current'
@@ -70,7 +92,7 @@ class DynamicRoutingEnvironment(RoutingEnvironment):
                  warmup_ms=0., dynamics_profile='icc',azure_path=None,azure_split='train',
                  azure_case='busy_transitions',end_to_end_forecast=False,
                  state_representation='latent',include_route_costs=False,
-                 average_resource_budget=0.,dpp_v=1.,data_cost_weight=0.):
+                 average_resource_budget=0.,dpp_v=1.,data_cost_weight=0.,deadline_aware=False):
         if state_representation not in ('latent','forecast'):
             raise ValueError('State representation must be latent or forecast')
         self.state_representation=state_representation
@@ -78,6 +100,7 @@ class DynamicRoutingEnvironment(RoutingEnvironment):
         self.average_resource_budget=float(average_resource_budget)
         self.dpp_v=float(dpp_v)
         self.dpp_data_weight=float(data_cost_weight)
+        self.deadline_aware=bool(deadline_aware)
         self.codec = codec.eval()
         self.resource_prices=capacity_rank_resource_prices(scenario)
         self._cost_references={}
@@ -463,7 +486,17 @@ class DynamicRoutingEnvironment(RoutingEnvironment):
         self.missing_samples.append(float(missing.mean()))
         fields=[embeddings.reshape(-1),backlog,downstream,transfer]
         if self.include_route_costs:fields.extend((resource_cost,data_cost))
-        state=np.concatenate([*fields,ages,missing,service,task_type,origin,slack]).astype(np.float32)
+        deadline=[]
+        if self.deadline_aware:
+            # Heuristic sum of unfinished processing work excluding this stage:
+            # slot-rounded core means and light processing means. It is known
+            # from the task graph and controller ledger, not future ground truth.
+            rest=self.remaining_work_ms(remaining)
+            budget=np.float32((task.deadline_ms-(self.now-req.arrival_ms)-rest)/50.)
+            deployed=np.asarray([bool(self.pools.get((stage.service,node))) for node in self.node_ids])
+            prior,doomed=deadline_prior(transfer,backlog,budget,deployed)
+            deadline=[prior,np.asarray([budget,doomed],np.float32)]
+        state=np.concatenate([*fields,ages,missing,service,task_type,origin,*deadline,slack]).astype(np.float32)
         if self.average_resource_budget:
             state=np.concatenate((state,np.asarray([self.cost_virtual_queue/self.dpp_v],np.float32)))
         if not np.isfinite(state).all():raise FloatingPointError('Nonfinite routing state')
@@ -539,6 +572,27 @@ class DynamicRoutingEnvironment(RoutingEnvironment):
                 'backlogs':np.asarray([self.backlog(stage,n) for n in self.node_ids],np.float32),
                 'deployed':np.asarray([bool(self.pools.get((stage.service,n))) for n in self.node_ids]),
                 'downstream_core_ms':core,'downstream_light_work':light}
+
+    def remaining_work_ms(self, remaining):
+        """Processing-work heuristic for other unfinished stages.
+
+        This sum includes parallel and in-flight unfinished stages, so it is
+        not a critical-path lower bound on the request's remaining latency.
+        """
+        total=0.
+        for name in remaining:
+            model=self.scenario.services[name]
+            if model.kind=='core':
+                total+=ceil(model.mean_processing_ms/self.settings.slot_ms)*self.settings.slot_ms
+            else:total+=model.mean_processing_ms
+        return total
+
+    def deadline_layout(self):
+        """State indices of the deadline-aware prior block: (prior start, budget, doomed)."""
+        if not self.deadline_aware:return None
+        nodes=len(self.node_ids);tail=2+(1 if self.average_resource_budget else 0)
+        start=-(tail+2+nodes)
+        return start,start+nodes,start+nodes+1
 
     def greedy_node(self):
         self.update_telemetry()
