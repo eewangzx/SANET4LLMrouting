@@ -1,0 +1,914 @@
+{
+  "schema": "edge-msd-icc-paper-v1",
+  "source": {
+    "file": "2026ICC_ZJ_Final_v1.pdf",
+    "title": "Modular Foundation Model Inference at the Edge: Network-Aware Microservice Optimization",
+    "parameter_source": "Table I, PDF page 6",
+    "dag_source": "Figure 1, PDF page 2",
+    "topology_source": "Figure 2, PDF page 2",
+    "data_kind": "published-parameter reconstruction; not author-original samples"
+  },
+  "seed": 2026,
+  "table_i": {
+    "resource_ranges_in_paper_order": {
+      "core": [
+        [
+          2,
+          16
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          4,
+          32
+        ],
+        [
+          4,
+          32
+        ]
+      ],
+      "light": [
+        [
+          0.5,
+          2
+        ],
+        [
+          0,
+          0.5
+        ],
+        [
+          0.25,
+          4
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "ed": [
+        [
+          1,
+          64
+        ],
+        [
+          1,
+          32
+        ],
+        [
+          0,
+          64
+        ],
+        [
+          0,
+          64
+        ]
+      ],
+      "es": [
+        [
+          128,
+          256
+        ],
+        [
+          64,
+          128
+        ],
+        [
+          1024,
+          2048
+        ],
+        [
+          256,
+          512
+        ]
+      ]
+    },
+    "core_work_mb": [
+      2,
+      16
+    ],
+    "core_output_mb": [
+      0.1,
+      1
+    ],
+    "core_rate_mb_per_ms": [
+      8,
+      32
+    ],
+    "light_work_mb": [
+      0.5,
+      2
+    ],
+    "light_output_mb": [
+      0.25,
+      1.5
+    ],
+    "light_gamma_shape": [
+      1,
+      2
+    ],
+    "light_gamma_scale_mb_per_ms": [
+      1,
+      20
+    ],
+    "core_costs_deploy_maintain_parallel": [
+      20,
+      4,
+      0
+    ],
+    "light_costs_deploy_maintain_parallel": [
+      4,
+      1,
+      0.5
+    ],
+    "arrival_mean_per_ms_per_user_task": [
+      0.15,
+      1.5
+    ],
+    "task_deadline_ms": [
+      50,
+      100
+    ],
+    "task_input_mb": [
+      0.5,
+      4
+    ],
+    "nakagami_m": [
+      1.5,
+      3
+    ],
+    "nakagami_omega": [
+      0.5,
+      1
+    ],
+    "wired_mb_per_ms": [
+      0.1,
+      1
+    ],
+    "epsilon": 0.2,
+    "load_multipliers": [
+      1,
+      1.5,
+      2
+    ]
+  },
+  "paper_resource_order": [
+    "CPU",
+    "RAM",
+    "GPU",
+    "VRAM"
+  ],
+  "resource_order": [
+    "CPU",
+    "GPU",
+    "RAM",
+    "VRAM"
+  ],
+  "sampled_service_quantities": {
+    "text_preprocess": {
+      "paper_id": 1,
+      "work_mb": 0.7684022205131542
+    },
+    "image_preprocess": {
+      "paper_id": 2,
+      "work_mb": 1.4791772040276978
+    },
+    "audio_preprocess": {
+      "paper_id": 3,
+      "work_mb": 1.1725708181001548
+    },
+    "text_encoder": {
+      "paper_id": 4,
+      "work_mb": 8.267826621542092,
+      "rate_mb_per_ms": 13.02598690966927
+    },
+    "image_encoder": {
+      "paper_id": 5,
+      "work_mb": 14.244736800690513,
+      "rate_mb_per_ms": 18.386305750878847
+    },
+    "audio_encoder": {
+      "paper_id": 6,
+      "work_mb": 14.606294386059108,
+      "rate_mb_per_ms": 13.469407493776584
+    },
+    "compression": {
+      "paper_id": 7,
+      "work_mb": 1.2396654844773212
+    },
+    "projection_c": {
+      "paper_id": 8,
+      "work_mb": 8.927615490838788,
+      "rate_mb_per_ms": 27.056745458612102
+    },
+    "projection_l": {
+      "paper_id": 9,
+      "work_mb": 1.2790763317165035
+    },
+    "multimodal_fusion": {
+      "paper_id": 10,
+      "work_mb": 12.220904089467169,
+      "rate_mb_per_ms": 29.32149023160024
+    },
+    "reasoning": {
+      "paper_id": 11,
+      "work_mb": 10.693096512800693,
+      "rate_mb_per_ms": 24.123823561344913
+    },
+    "postprocess_qa": {
+      "paper_id": 12,
+      "work_mb": 1.2310445991087673
+    },
+    "postprocess_crossmodal": {
+      "paper_id": 13,
+      "work_mb": 1.8775952868058952
+    },
+    "postprocess_classification": {
+      "paper_id": 14,
+      "work_mb": 0.8498948093002081
+    },
+    "postprocess_driving": {
+      "paper_id": 15,
+      "work_mb": 1.4102215715513051
+    }
+  },
+  "scenario": {
+    "services": [
+      {
+        "name": "text_preprocess",
+        "kind": "light",
+        "resources": [
+          1.4598697485727319,
+          1.6393769766551802,
+          0.23363420057174256,
+          0.3549173343096512
+        ],
+        "output_mb": 1.2381478073165813,
+        "deployment_cost": 4,
+        "maintenance_cost": 1,
+        "parallel_cost": 0.5,
+        "work_mb": 0.7684022205131542,
+        "gamma_shape": 1.905143836677174,
+        "gamma_scale": 4.369710644637925
+      },
+      {
+        "name": "image_preprocess",
+        "kind": "light",
+        "resources": [
+          0.9474541510333538,
+          3.6994381020147933,
+          0.48348110008119527,
+          0.6358708041446514
+        ],
+        "output_mb": 1.1909151213488582,
+        "deployment_cost": 4,
+        "maintenance_cost": 1,
+        "parallel_cost": 0.5,
+        "work_mb": 1.4791772040276978,
+        "gamma_shape": 1.5151536963223518,
+        "gamma_scale": 16.69200990913583
+      },
+      {
+        "name": "audio_preprocess",
+        "kind": "light",
+        "resources": [
+          1.0082186799706427,
+          1.098748963162763,
+          0.13894960775007953,
+          0.5258168433452484
+        ],
+        "output_mb": 0.7886400758555393,
+        "deployment_cost": 4,
+        "maintenance_cost": 1,
+        "parallel_cost": 0.5,
+        "work_mb": 1.1725708181001548,
+        "gamma_shape": 1.6631806204725954,
+        "gamma_scale": 1.2439691649693247
+      },
+      {
+        "name": "text_encoder",
+        "kind": "core",
+        "resources": [
+          7.11253121585348,
+          20.65624438816948,
+          1.586192799614662,
+          16.18876836661805
+        ],
+        "output_mb": 0.36999235337063485,
+        "deployment_cost": 20,
+        "maintenance_cost": 4,
+        "parallel_cost": 0,
+        "work_mb": 8.267826621542092,
+        "processing_ms": 0.6347178665905793
+      },
+      {
+        "name": "image_encoder",
+        "kind": "core",
+        "resources": [
+          13.164472417300058,
+          13.66281620268418,
+          2.820129030054937,
+          30.510954147430155
+        ],
+        "output_mb": 0.607039637052291,
+        "deployment_cost": 20,
+        "maintenance_cost": 4,
+        "parallel_cost": 0,
+        "work_mb": 14.244736800690513,
+        "processing_ms": 0.774747085885354
+      },
+      {
+        "name": "audio_encoder",
+        "kind": "core",
+        "resources": [
+          6.470785254626073,
+          12.786969163346363,
+          3.08798461040135,
+          11.3234852967304
+        ],
+        "output_mb": 0.7307568005507699,
+        "deployment_cost": 20,
+        "maintenance_cost": 4,
+        "parallel_cost": 0,
+        "work_mb": 14.606294386059108,
+        "processing_ms": 1.0844051152812633
+      },
+      {
+        "name": "compression",
+        "kind": "light",
+        "resources": [
+          1.3700426795308343,
+          2.9921524688441674,
+          0.09445318237722922,
+          0.5484830646246303
+        ],
+        "output_mb": 1.026879074532422,
+        "deployment_cost": 4,
+        "maintenance_cost": 1,
+        "parallel_cost": 0.5,
+        "work_mb": 1.2396654844773212,
+        "gamma_shape": 1.37214431679683,
+        "gamma_scale": 8.983671938492042
+      },
+      {
+        "name": "projection_c",
+        "kind": "core",
+        "resources": [
+          8.579592773686379,
+          20.160970125893577,
+          3.0269176685488692,
+          15.655578003789056
+        ],
+        "output_mb": 0.10162211824613712,
+        "deployment_cost": 20,
+        "maintenance_cost": 4,
+        "parallel_cost": 0,
+        "work_mb": 8.927615490838788,
+        "processing_ms": 0.3299589562423572
+      },
+      {
+        "name": "projection_l",
+        "kind": "light",
+        "resources": [
+          0.989816995716905,
+          0.6004222506048177,
+          0.24997751120559697,
+          0.9047040725533528
+        ],
+        "output_mb": 1.4871702094806294,
+        "deployment_cost": 4,
+        "maintenance_cost": 1,
+        "parallel_cost": 0.5,
+        "work_mb": 1.2790763317165035,
+        "gamma_shape": 1.0587352175155829,
+        "gamma_scale": 7.806393153236247
+      },
+      {
+        "name": "multimodal_fusion",
+        "kind": "core",
+        "resources": [
+          6.399333837050357,
+          15.663986944820836,
+          2.701149275093347,
+          25.677940413664498
+        ],
+        "output_mb": 0.9626179608676304,
+        "deployment_cost": 20,
+        "maintenance_cost": 4,
+        "parallel_cost": 0,
+        "work_mb": 12.220904089467169,
+        "processing_ms": 0.4167900059969157
+      },
+      {
+        "name": "reasoning",
+        "kind": "core",
+        "resources": [
+          4.243840377352977,
+          4.66170800280973,
+          3.8411862499349883,
+          12.33586477978412
+        ],
+        "output_mb": 0.35345214379053624,
+        "deployment_cost": 20,
+        "maintenance_cost": 4,
+        "parallel_cost": 0,
+        "work_mb": 10.693096512800693,
+        "processing_ms": 0.44325877635479394
+      },
+      {
+        "name": "postprocess_qa",
+        "kind": "light",
+        "resources": [
+          0.6393328231361708,
+          2.516184050401142,
+          0.006428943872465176,
+          0.4914833323409261
+        ],
+        "output_mb": 1.0017276516755014,
+        "deployment_cost": 4,
+        "maintenance_cost": 1,
+        "parallel_cost": 0.5,
+        "work_mb": 1.2310445991087673,
+        "gamma_shape": 1.5640238638655344,
+        "gamma_scale": 17.91872305769392
+      },
+      {
+        "name": "postprocess_crossmodal",
+        "kind": "light",
+        "resources": [
+          0.7823857416535476,
+          3.2039748487104385,
+          0.4710604347352671,
+          0.6390262522229664
+        ],
+        "output_mb": 1.0745090843636866,
+        "deployment_cost": 4,
+        "maintenance_cost": 1,
+        "parallel_cost": 0.5,
+        "work_mb": 1.8775952868058952,
+        "gamma_shape": 1.5460602299006425,
+        "gamma_scale": 18.428002693213973
+      },
+      {
+        "name": "postprocess_classification",
+        "kind": "light",
+        "resources": [
+          1.3989739884043713,
+          0.7553554435792373,
+          0.40712153093582526,
+          0.615508274358867
+        ],
+        "output_mb": 0.7535418444119675,
+        "deployment_cost": 4,
+        "maintenance_cost": 1,
+        "parallel_cost": 0.5,
+        "work_mb": 0.8498948093002081,
+        "gamma_shape": 1.766036341466283,
+        "gamma_scale": 2.2865728517902713
+      },
+      {
+        "name": "postprocess_driving",
+        "kind": "light",
+        "resources": [
+          1.7856180349799702,
+          1.455016357950703,
+          0.3141739311815453,
+          0.6557960559218892
+        ],
+        "output_mb": 0.6726910534200135,
+        "deployment_cost": 4,
+        "maintenance_cost": 1,
+        "parallel_cost": 0.5,
+        "work_mb": 1.4102215715513051,
+        "gamma_shape": 1.66859278841009,
+        "gamma_scale": 3.4385436273990164
+      }
+    ],
+    "tasks": [
+      {
+        "name": "open_domain_qa",
+        "dependencies": {
+          "text_preprocess": [],
+          "text_encoder": [
+            "text_preprocess"
+          ],
+          "projection_c": [
+            "text_encoder"
+          ],
+          "reasoning": [
+            "projection_c"
+          ],
+          "postprocess_qa": [
+            "reasoning"
+          ]
+        },
+        "deadline_ms": 63.99958720979463,
+        "input_mb": 0.6145143236892038
+      },
+      {
+        "name": "cross_modal_understanding",
+        "dependencies": {
+          "text_preprocess": [],
+          "image_preprocess": [],
+          "text_encoder": [
+            "text_preprocess"
+          ],
+          "image_encoder": [
+            "image_preprocess"
+          ],
+          "projection_c": [
+            "text_encoder",
+            "image_encoder"
+          ],
+          "multimodal_fusion": [
+            "projection_c"
+          ],
+          "postprocess_crossmodal": [
+            "multimodal_fusion"
+          ]
+        },
+        "deadline_ms": 54.195469448134546,
+        "input_mb": 2.4416936693577727
+      },
+      {
+        "name": "classification",
+        "dependencies": {
+          "image_preprocess": [],
+          "image_encoder": [
+            "image_preprocess"
+          ],
+          "projection_l": [
+            "image_encoder"
+          ],
+          "reasoning": [
+            "projection_l"
+          ],
+          "postprocess_classification": [
+            "reasoning"
+          ]
+        },
+        "deadline_ms": 61.58491106961536,
+        "input_mb": 2.3062890567320613
+      },
+      {
+        "name": "multimodal_driving",
+        "dependencies": {
+          "image_preprocess": [],
+          "audio_preprocess": [],
+          "image_encoder": [
+            "image_preprocess"
+          ],
+          "audio_encoder": [
+            "audio_preprocess"
+          ],
+          "compression": [
+            "audio_encoder"
+          ],
+          "projection_c": [
+            "image_encoder",
+            "compression"
+          ],
+          "multimodal_fusion": [
+            "projection_c"
+          ],
+          "postprocess_driving": [
+            "multimodal_fusion"
+          ]
+        },
+        "deadline_ms": 82.97847665364205,
+        "input_mb": 3.5841516277233323
+      }
+    ],
+    "nodes": [
+      {
+        "name": "es1",
+        "resources": [
+          173.44780986733295,
+          1345.1947433613395,
+          84.3954538520797,
+          286.1695089982452
+        ],
+        "position": [
+          0,
+          100
+        ]
+      },
+      {
+        "name": "es2",
+        "resources": [
+          212.88747067612985,
+          1508.3569775237006,
+          116.45789321198146,
+          398.92413361882814
+        ],
+        "position": [
+          100,
+          0
+        ]
+      },
+      {
+        "name": "es3",
+        "resources": [
+          250.68545455303916,
+          1786.9157239271954,
+          108.73057098575927,
+          483.71157946995925
+        ],
+        "position": [
+          200,
+          100
+        ]
+      },
+      {
+        "name": "ed1",
+        "resources": [
+          14.59480629329949,
+          45.91324834088919,
+          21.15514780794141,
+          53.90258750230565
+        ],
+        "position": [
+          -20,
+          140
+        ]
+      },
+      {
+        "name": "ed2",
+        "resources": [
+          22.658489398119347,
+          38.68163877136677,
+          22.35263587710448,
+          26.19910616465058
+        ],
+        "position": [
+          70,
+          150
+        ]
+      },
+      {
+        "name": "ed3",
+        "resources": [
+          7.4062026961762895,
+          61.66302387971064,
+          11.944501447277354,
+          13.857504103219107
+        ],
+        "position": [
+          -30,
+          40
+        ]
+      },
+      {
+        "name": "ed4",
+        "resources": [
+          8.159193596055063,
+          6.462770694782854,
+          12.398062166847241,
+          17.10073163752137
+        ],
+        "position": [
+          70,
+          -30
+        ]
+      },
+      {
+        "name": "ed5",
+        "resources": [
+          58.61073569248425,
+          37.49692893099685,
+          10.882244524812965,
+          15.279665891516899
+        ],
+        "position": [
+          160,
+          -20
+        ]
+      },
+      {
+        "name": "ed6",
+        "resources": [
+          43.08273523710581,
+          50.54780052963231,
+          4.957348017611358,
+          27.06854686538194
+        ],
+        "position": [
+          230,
+          40
+        ]
+      },
+      {
+        "name": "ed7",
+        "resources": [
+          12.570604386760172,
+          35.4740824977429,
+          24.50573653510322,
+          28.04128066118202
+        ],
+        "position": [
+          240,
+          140
+        ]
+      }
+    ],
+    "links": [
+      [
+        "es1",
+        "es2",
+        2.5325075010591673,
+        0.0
+      ],
+      [
+        "es1",
+        "es3",
+        6.4258344310019675,
+        0.0
+      ],
+      [
+        "es2",
+        "es3",
+        3.430052408264916,
+        0.0
+      ],
+      [
+        "ed1",
+        "es1",
+        1.110252972569089,
+        0.0
+      ],
+      [
+        "ed2",
+        "es1",
+        7.750658742881695,
+        0.0
+      ],
+      [
+        "ed3",
+        "es1",
+        1.0193466184992444,
+        0.0
+      ],
+      [
+        "ed4",
+        "es2",
+        1.667377358891894,
+        0.0
+      ],
+      [
+        "ed5",
+        "es2",
+        4.153850223166732,
+        0.0
+      ],
+      [
+        "ed6",
+        "es3",
+        2.296555579317923,
+        0.0
+      ],
+      [
+        "ed7",
+        "es3",
+        3.212972270619887,
+        0.0
+      ]
+    ],
+    "users": [
+      {
+        "name": "user_ed1",
+        "position": [
+          -20,
+          140
+        ],
+        "gateway": "es1",
+        "rates_per_second": {
+          "open_domain_qa": 916.2130766100099,
+          "cross_modal_understanding": 1443.0866355495868,
+          "classification": 1414.0215027480904,
+          "multimodal_driving": 249.75956739106752
+        },
+        "nakagami_m": 2.779970484389999,
+        "omega": 0.5839118275661226
+      },
+      {
+        "name": "user_ed2",
+        "position": [
+          70,
+          150
+        ],
+        "gateway": "es1",
+        "rates_per_second": {
+          "open_domain_qa": 1245.4343778793652,
+          "cross_modal_understanding": 550.068744095069,
+          "classification": 1119.0763823319126,
+          "multimodal_driving": 1120.3708267871611
+        },
+        "nakagami_m": 2.7758268896345326,
+        "omega": 0.9898129244257468
+      },
+      {
+        "name": "user_ed3",
+        "position": [
+          -30,
+          40
+        ],
+        "gateway": "es1",
+        "rates_per_second": {
+          "open_domain_qa": 521.8991513650524,
+          "cross_modal_understanding": 998.2164192104281,
+          "classification": 1148.002074109996,
+          "multimodal_driving": 257.4996057270691
+        },
+        "nakagami_m": 2.4944420066532733,
+        "omega": 0.6607577576541239
+      },
+      {
+        "name": "user_ed4",
+        "position": [
+          70,
+          -30
+        ],
+        "gateway": "es2",
+        "rates_per_second": {
+          "open_domain_qa": 367.98320759228363,
+          "cross_modal_understanding": 891.7866030769248,
+          "classification": 773.5428560547164,
+          "multimodal_driving": 929.0577744958732
+        },
+        "nakagami_m": 2.4628763856050355,
+        "omega": 0.7493344306742509
+      },
+      {
+        "name": "user_ed5",
+        "position": [
+          160,
+          -20
+        ],
+        "gateway": "es2",
+        "rates_per_second": {
+          "open_domain_qa": 1371.9534550428339,
+          "cross_modal_understanding": 390.18416782785596,
+          "classification": 539.8687261627244,
+          "multimodal_driving": 630.8992155931148
+        },
+        "nakagami_m": 2.6615730301179914,
+        "omega": 0.8260490584329772
+      },
+      {
+        "name": "user_ed6",
+        "position": [
+          230,
+          40
+        ],
+        "gateway": "es3",
+        "rates_per_second": {
+          "open_domain_qa": 428.67061808479554,
+          "cross_modal_understanding": 1154.9965523017866,
+          "classification": 1191.5750011741047,
+          "multimodal_driving": 1189.8259785228104
+        },
+        "nakagami_m": 1.6175593573832794,
+        "omega": 0.6060695744128863
+      },
+      {
+        "name": "user_ed7",
+        "position": [
+          240,
+          140
+        ],
+        "gateway": "es3",
+        "rates_per_second": {
+          "open_domain_qa": 1358.7697866290382,
+          "cross_modal_understanding": 1337.2332808268095,
+          "classification": 427.5230877555083,
+          "multimodal_driving": 894.3571387248664
+        },
+        "nakagami_m": 1.8940248876715218,
+        "omega": 0.7081423857830654
+      }
+    ],
+    "profile": "icc_paper_reconstruction"
+  },
+  "assumptions_not_specified_numerically_by_paper": {
+    "range_sampling": "independent continuous uniform; paper specifies ranges only",
+    "node_counts": "7 ED + 3 ES read from Figure 2",
+    "topology": "three connected ESs plus explicit ED attachments; illustrative reconstruction",
+    "positions": "illustrative coordinates, not measured or author-original",
+    "users": "one user per ED, each generating all four task types",
+    "gateway": "associated ES represents entry into the wired edge network",
+    "wired_propagation_ms": 0.0,
+    "wireless_default": "disabled; Table I lacks allocated bandwidth and complete radio settings",
+    "gamma_parameterization": "shape and scale of processing RATE, MB/ms",
+    "nakagami_parameterization": "stored m and Omega; not treated as Gbps despite table heading",
+    "root_payload": "full task input delivered to each root; modality split unspecified",
+    "missing": [
+      "original run seeds",
+      "sampled original scenarios",
+      "original traces",
+      "simulation horizon and step",
+      "radio configuration",
+      "answer-quality labels"
+    ]
+  }
+}

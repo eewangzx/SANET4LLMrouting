@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+runs/
+output/
+papers/
+data/azure/
+*.pt
+*.pth
+*.npz
+*.bundle
+*.pdf

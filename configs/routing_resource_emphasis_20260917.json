@@ -1,0 +1,52 @@
+{
+  "purpose": "Long-term average resource-budget constraint using a cost virtual queue and global predictive RL",
+  "resource_cost_weight": 0.0,
+  "data_cost_weight": 0.05,
+  "latency_weight": 0.0,
+  "route_residual_bound": 0.25,
+  "learning_rate": 0.00001,
+  "pricing": "Same fixed CPU/GPU-capacity prices in [3,10] as the previous cost experiment; all policies pay the same node prices",
+  "episodes": 48,
+  "updates_per_episode": 1000,
+  "initial_policy_eligible": false,
+  "driving": {
+    "codec_source": "routing_driving_resource_cost_20260917_130300/proposed/best.pt",
+    "fresh_q": true,
+    "train_seed_base": 73400,
+    "validation_seeds": [
+      71000,
+      71001,
+      71002
+    ],
+    "test_seeds": [
+      91000,
+      91001,
+      91002
+    ],
+    "end_to_end_forecast": true
+  },
+  "azure": {
+    "codec_source": "routing_azure_resource_cost_20260917_130651/proposed/best.pt",
+    "fresh_q": true,
+    "train_seed_base": 82800,
+    "validation_seeds": [
+      81000,
+      81001,
+      81002
+    ],
+    "test_seeds": [
+      92000,
+      92001,
+      92002
+    ],
+    "end_to_end_forecast": true
+  },
+  "selection": "Validation budget feasibility first; then SLA-minus-data objective; least violation if none feasible; test frozen before training",
+  "scope": "No method-specific charges; no price reassignment, deployment, dynamics, reporting, workload or SLA changes",
+  "average_resource_budget": 0.87,
+  "contract_resource_budget": 0.90,
+  "budget_interpretation": "The queue uses the conservative internal target 0.87; the contract budget 0.90 was fixed before confirmatory seeds 93000-93002 were evaluated",
+  "dpp_v": 10.0,
+  "return_time_ms": 100.0,
+  "n_step": 32
+}

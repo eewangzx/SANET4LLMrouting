@@ -1,0 +1,59 @@
+# ICC scenario parameters: reconstruction of the published Table I ranges.
+# Source paper: "Modular Foundation Model Inference at the Edge: Network-Aware
+# Microservice Optimization" (Zhu, Wang, Song, Zhang, Letaief), 2026.
+# These are RANGES, not one instance. A concrete instance is sampled once
+# (seed=2026) by edge_msd.icc_paper and frozen in
+# data/icc_paper/scenario_2026.json, which every method reuses.
+# Per-field provenance: configs/parameter_sources.csv
+schema: edge-msd-icc-scenario-config-v1
+source:
+  file: 2026ICC_ZJ_Final_v1.pdf
+  parameter_source: "Table I, page 6"
+  dag_source: "Figure 1, page 2"
+  topology_source: "Figure 2, page 2"
+  data_kind: published-parameter-reconstruction
+units:
+  time: ms
+  data: MB
+  wired_bandwidth: Gbps
+  arrival_rate: per_ms_per_user_task
+  paper_resource_order: [CPU, RAM, GPU, VRAM]
+  code_resource_order: [CPU, GPU, RAM, VRAM]
+resource_ranges:               # paper order: CPU, RAM, GPU, VRAM
+  core_service:  {CPU: [2, 16], RAM: [1, 4], GPU: [4, 32], VRAM: [4, 32]}
+  light_service: {CPU: [0.5, 2], RAM: [0, 0.5], GPU: [0.25, 4], VRAM: [0, 1]}
+  edge_device:   {CPU: [1, 64], RAM: [1, 32], GPU: [0, 64], VRAM: [0, 64]}
+  edge_server:   {CPU: [128, 256], RAM: [64, 128], GPU: [1024, 2048], VRAM: [256, 512]}
+service_parameters:
+  core:
+    work_mb: [2, 16]
+    output_mb: [0.1, 1]
+    rate_mb_per_ms: [8, 32]
+    costs_deploy_maintain_parallel: [20.0, 4.0, 0.0]
+  light:
+    work_mb: [0.5, 2]
+    output_mb: [0.25, 1.5]
+    gamma_shape: [1, 2]
+    gamma_scale_mb_per_ms: [1, 20]
+    costs_deploy_maintain_parallel: [4.0, 1.0, 0.5]
+traffic:
+  arrival_mean_per_ms_per_user_task: [0.15, 1.5]
+  task_deadline_ms: [50, 100]
+  task_input_mb: [0.5, 4]
+wireless:
+  nakagami_m: [1.5, 3]
+  nakagami_omega: [0.5, 1]
+  note: >-
+    Table I prints these under gamma_u labelled Gbs; they are treated as Nakagami
+    m/Omega (shape/mean), NOT as Gbps. Wireless is disabled until allocated
+    bandwidth and complete radio settings are available.
+wired:
+  link_rate_mb_per_ms: [0.1, 1]
+  propagation_ms: 0.0
+quality_of_service:
+  epsilon: 0.2
+topology:
+  nodes: "7 edge devices (ED) + 3 edge servers (ES) read from Figure 2"
+  task_types: 4
+  core_services: 6
+  light_services: 9

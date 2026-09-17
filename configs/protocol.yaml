@@ -1,0 +1,35 @@
+# Episode, telemetry and evaluation protocol. Stage A fixes the episode and
+# evaluation rules; telemetry fields are declared here so every method shares
+# one definition, but they are only implemented in Stage B.
+schema: edge-msd-icc-protocol-v1
+episode:
+  arrival_window_ms: 200     # requests are generated within this window
+  drain_ms: 150              # extra drain so the last deadlines are observable
+  slot_ms: 1.0               # one control boundary per millisecond
+  report_period_ms: 100      # telemetry reporting period (Stage B)
+telemetry:                   # fixed code length; never varies with the encoder
+  window_samples: 8
+  sample_interval_ms: 5
+  features: 16
+  link_capacity_bits_per_second: 64000
+  bandwidth_scope: per_node  # "per_node" or "shared"; the two are never mixed
+  header_bytes: 16
+  codecs:
+    raw:      {payload_bytes: 512, total_bytes: 528}
+    stats16:  {payload_bytes: 64,  total_bytes: 80}
+    proposed: {payload_bytes: 16,  total_bytes: 32}
+evaluation:
+  train_seeds: [7, 8, 9]
+  validation_scenarios: [8400, 8401]
+  test_scenarios: [200000, 200001, 200002, 200003, 200004, 200005, 200006, 200007, 200008, 200009]
+  load_multipliers: [1.0, 1.5, 2.0]
+reward:
+  ontime: 1.0
+  violation: -1.0
+  discount_per_ms: 0.995
+  half_life_ms: 138.6
+methods:                     # the four core comparisons (Stage D)
+  - raw_dqn
+  - stats16_dqn
+  - proposed_dqn
+  - stats16_greedy

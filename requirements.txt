@@ -1,0 +1,10 @@
+# Portable project dependencies. Actual experiment versions are recorded in
+# environment/runtime_versions.json and environment/requirements-observed.txt.
+numpy>=1.24
+scipy>=1.11
+networkx>=3.0
+torch>=2.2
+matplotlib>=3.8
+pytest>=7
+ruff>=0.9
+
