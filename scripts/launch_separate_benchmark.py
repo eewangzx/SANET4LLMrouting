@@ -41,9 +41,9 @@ def main():
         'end_to_end_forecast':False,'forecast_epochs':args.forecast_epochs,'episodes':48,'updates_per_episode':1000,
         'state_representation':'full 61x14 age-aligned receiver forecast per node instead of Z',
         'codec_initialization':'random importance codec; independent supervised prediction training only',
-        'rl_initialization':'fresh 64-wide Q; same predictive cost prior and bounded residual',
+        'rl_initialization':'fresh 64-wide Q; learned routing with no fixed action prior',
         'codec_frozen_during_rl':True,'reference_run':str(args.reference),
-        'initial_policy_eligible_for_selection':not args.require_trained_rl,
+        'initial_policy_eligible_for_selection':False,
         'source_archive_sha256':hashlib.sha256(args.source_archive.read_bytes()).hexdigest()}
     # Joint initialization belongs to the reference proposed, never this baseline.
     for key in ('joint_init_sha256','initial_checkpoint_reference','initialization'):

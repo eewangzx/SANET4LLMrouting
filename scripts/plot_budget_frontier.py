@@ -10,12 +10,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-NAMES={'proposed':'Proposed','predictive_budget':'PM-DPP',
+NAMES={'proposed':'Proposed','decoded_separate':'Decoded + RL (separate)','current_budget':'CS-DPP','predictive_budget':'PM-DPP',
        'predictive_deadline':'PDH (matched codec)','latency_only':'LOM',
        'greedy':'LOM','random':'Random','shortest_queue':'Shortest Queue'}
-COLORS={'Proposed':'#1764a1','PM-DPP':'#d37922','PDH (matched codec)':'#8057a8',
+COLORS={'Proposed':'#1764a1','Decoded + RL (separate)':'#a1436e','CS-DPP':'#267e77','PM-DPP':'#d37922','PDH (matched codec)':'#8057a8',
         'LOM':'#4c4c4c','Random':'#a6a6a6','Shortest Queue':'#488b67'}
-MARKERS={'Proposed':'o','PM-DPP':'s','PDH (matched codec)':'^',
+MARKERS={'Proposed':'o','Decoded + RL (separate)':'v','CS-DPP':'h','PM-DPP':'s','PDH (matched codec)':'^',
          'LOM':'X','Random':'d','Shortest Queue':'P'}
 
 

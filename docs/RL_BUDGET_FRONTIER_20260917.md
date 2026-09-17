@@ -34,6 +34,14 @@ information, not a separate codec ablation.
 
 ## Credit and selection
 
+CS-DPP uses the same myopic deadline proxy and virtual-queue pricing as PM-DPP,
+but only delayed raw current reports, with no learned prediction. The decoded
+separate baseline also uses chronological average-budget credit; its predictor
+is pretrained independently and remains frozen while Q learns from the full
+decoded forecast. `--evaluate-only --joint-init best.pt` evaluates an already
+trained, validation-selected policy without optimizer updates. Interim results
+identify the frozen checkpoint episode and are kept apart from final runs.
+
 Average-budget DQN uses chronological decisions across requests. Its reward
 contains all SLA settlements between decisions and the Lyapunov shadow-priced
 stage charge. Replay aggregates at least 10 ms of physical time before

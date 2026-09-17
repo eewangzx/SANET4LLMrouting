@@ -74,8 +74,8 @@ def collect(env,agent=None,epsilon=0.,buffer=None,n_step=3,policy='greedy',n_ste
             if policy=='random':
                 action=int(policy_rng.choice(np.flatnonzero(mask)))
                 node=env.node_ids[action]
-            elif policy in ('predictive_deadline','predictive_budget'):
-                node=(env.predictive_budget_node(state,mask) if policy=='predictive_budget'
+            elif policy in ('predictive_deadline','predictive_budget','current_budget'):
+                node=(env.predictive_budget_node(state,mask) if policy in ('predictive_budget','current_budget')
                       else env.predictive_deadline_node(state,mask))
                 action=env.node_ids.index(node)
             else:
@@ -116,7 +116,7 @@ def collect(env,agent=None,epsilon=0.,buffer=None,n_step=3,policy='greedy',n_ste
 
 def main():
     p=argparse.ArgumentParser()
-    p.add_argument('--bench',choices=['proposed','decoded_separate','predictive_deadline','predictive_budget',
+    p.add_argument('--bench',choices=['proposed','decoded_separate','predictive_deadline','predictive_budget','current_budget',
                    'latency_only','greedy','random','shortest_queue'],required=True,
                    help='latency_only is cost-unaware myopic routing; greedy is its legacy alias')
     p.add_argument('--algorithm',choices=['dqn','ppo'],default='dqn')
@@ -129,6 +129,7 @@ def main():
     p.add_argument('--dataset',type=Path,default=Path('data/icc_paper/scenario_2026.json'))
     p.add_argument('--codec-init',type=Path,default=Path('runs/icc_coupled_models/importance.pt'))
     p.add_argument('--joint-init',type=Path)
+    p.add_argument('--evaluate-only',action='store_true',help='evaluate a trained --joint-init without changing any parameters')
     p.add_argument('--fresh-q',action='store_true')
     p.add_argument('--predictive-cost-prior',action='store_true',
                    help=argparse.SUPPRESS)
@@ -170,8 +171,10 @@ def main():
     learned=args.bench in ('proposed','decoded_separate')
     separate=args.bench=='decoded_separate'
     predictive_baseline=args.bench in ('predictive_deadline','predictive_budget')
-    if separate and (args.algorithm!='dqn' or args.joint_init or args.end_to_end_forecast):
+    if separate and (args.algorithm!='dqn' or (args.joint_init and not args.evaluate_only) or args.end_to_end_forecast):
         p.error('decoded_separate uses DQN and an independently pretrained frozen --codec-init, without --joint-init or --end-to-end-forecast')
+    if args.evaluate_only and (not learned or args.joint_init is None or args.fresh_q):
+        p.error('evaluate-only requires a learned method and trained --joint-init, without fresh-q')
     if args.report_ms <= 0 or args.report_bps <= 0 or args.warmup_ms < 0:
         p.error("report period/bandwidth must be positive and warmup nonnegative")
     if args.dynamics_profile=='azure' and args.azure_trace is None:
@@ -189,17 +192,17 @@ def main():
         p.error('average resource budget must be in [0,1]; zero disables')
     if args.dpp_v<=0 or args.return_time_ms<=0 or args.lr<=0 or not math.isfinite(args.dpp_v+args.return_time_ms+args.lr):
         p.error('DPP V, physical return time and learning rate must be positive and finite')
-    if args.average_resource_budget and (separate or args.resource_cost_weight):
+    if args.average_resource_budget and args.resource_cost_weight:
         p.error('average-budget training uses joint system returns and queue-weighted resource cost, without a fixed resource weight')
     if args.n_step<1 or not math.isfinite(args.n_step_ms) or args.n_step_ms<0:
         p.error('n-step count must be positive and physical-time horizon nonnegative')
     if args.predictive_cost_prior or args.deadline_aware_prior:
         p.error('action priors are an independent baseline; use --bench predictive_deadline')
-    if args.bench=='predictive_budget' and not args.average_resource_budget:
-        p.error('predictive_budget requires an average resource budget')
+    if args.bench in ('predictive_budget','current_budget') and not args.average_resource_budget:
+        p.error('myopic DPP requires an average resource budget')
     if args.joint_init and not (learned or predictive_baseline):
         p.error('--joint-init is meaningful only for learned or predictive policies')
-    if learned and (args.episodes<1 or args.updates_per_episode<1):
+    if learned and not args.evaluate_only and (args.episodes<1 or args.updates_per_episode<1):
         p.error('a learned method requires at least one episode and one update per episode')
     torch.set_num_threads(1);torch.set_num_interop_threads(1)
     random.seed(args.seed);np.random.seed(args.seed);torch.manual_seed(args.seed)
@@ -224,7 +227,7 @@ def main():
                  state_representation='forecast' if separate else 'latent',
                  include_route_costs=bool(args.resource_cost_weight or args.data_cost_weight or args.average_resource_budget),
                  average_resource_budget=args.average_resource_budget,dpp_v=args.dpp_v,
-                 data_cost_weight=args.data_cost_weight,deadline_aware=predictive_baseline)
+                 data_cost_weight=args.data_cost_weight,deadline_aware=predictive_baseline or args.bench=='current_budget')
     root=args.output;root.mkdir(parents=True,exist_ok=True)
     started=time.perf_counter()
     def write(name,value):
@@ -232,7 +235,7 @@ def main():
     write('status.json',{'status':'running','stage':'setup'})
     example=world(52000,split='train');state,mask=example.state()
     train_seeds=(list(range(args.train_seed_base,args.train_seed_base+args.episodes))
-                 if learned else [])
+                 if learned and not args.evaluate_only else [])
     test_seeds=[int(s) for s in args.test_seeds.split(',')]
     validation_seeds=[int(s) for s in args.validation_seeds.split(',') if s]
     if args.validate_every<=0:
@@ -321,6 +324,13 @@ def main():
         if args.joint_init:
             manifest['joint_init_sha256']=hashlib.sha256(args.joint_init.read_bytes()).hexdigest()
             manifest['joint_init_note']='use the selected Proposed codec only; no learned routing parameters loaded'
+    if args.bench=='current_budget':
+        manifest['method_name']='Current-State Myopic DPP (CS-DPP)'
+        manifest['baseline_definition']={
+            'decision':'same deadline-success proxy and queue shadow-priced resource charge as PM-DPP, evaluated from latest delivered current measurements',
+            'information':'delayed raw current reports and dispatch/completion ledger',
+            'prediction':False,'reinforcement_learning':False,'average_budget_considered':True,
+            'resource_cost_considered':True,'data_cost_considered':True,'oracle':False}
     if not (args.resource_cost_weight or args.data_cost_weight or args.average_resource_budget):
         manifest['state_fields']=[name for name in manifest['state_fields']
                                   if name not in ('incremental_resource_cost','incremental_data_cost')]
@@ -382,6 +392,8 @@ def main():
         if args.joint_init:
             checkpoint=torch.load(args.joint_init,map_location=device,weights_only=True)
             matching=checkpoint.get('manifest',{}).get('algorithm','dqn')==args.algorithm
+            if args.evaluate_only and (not matching or checkpoint.get('episode',0)<1):
+                p.error('evaluate-only requires a checkpoint after RL updates with the matching algorithm')
             if not args.fresh_q and (matching or args.ppo_warm_start):
                 for network,key in ((agent.online,'online'),(agent.target,'target')):
                     warm_actor=args.algorithm=='ppo' and args.ppo_warm_start and not matching
@@ -452,9 +464,16 @@ def main():
                 trajectory_return='chronological system settlements; physical-time GAE',
                 gae_time_ms=args.return_time_ms/4.,
                 policy_parameterization='shared learned candidate logits / temperature; per-node latent LayerNorm; no fixed action prior')
+    if args.evaluate_only:
+        manifest.update(training='evaluation only; no optimizer updates',
+            model_selection='use the supplied validation-selected trained checkpoint',
+            evaluated_checkpoint_episode=checkpoint['episode'])
+        write('model_selection.json',{'episode':checkpoint['episode'],
+            'checkpoint':str(args.joint_init),'test_access_used_for_selection':False,
+            'interim_evaluation':True})
     write('manifest.json',manifest)
     print('START',args.bench,json.dumps(manifest),flush=True)
-    if learned:
+    if learned and not args.evaluate_only:
         buffer=[]
         best_score=None;best_episode=None;best_validation=None;validation_rows=[]
         def checkpoint(path,episode):
