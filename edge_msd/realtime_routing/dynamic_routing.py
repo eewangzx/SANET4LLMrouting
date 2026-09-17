@@ -498,7 +498,9 @@ class DynamicRoutingEnvironment(RoutingEnvironment):
             deadline=[prior,np.asarray([budget,doomed],np.float32)]
         state=np.concatenate([*fields,ages,missing,service,task_type,origin,*deadline,slack]).astype(np.float32)
         if self.average_resource_budget:
-            state=np.concatenate((state,np.asarray([self.cost_virtual_queue/self.dpp_v],np.float32)))
+            # Preserve the shadow-price information without letting a transient
+            # large queue erase the other features under input LayerNorm.
+            state=np.concatenate((state,np.asarray([np.log1p(self.cost_virtual_queue/self.dpp_v)],np.float32)))
         if not np.isfinite(state).all():raise FloatingPointError('Nonfinite routing state')
         legal=set(self.legal_nodes(stage))
         mask=np.asarray([node in legal for node in self.node_ids],np.float32)
@@ -594,6 +596,49 @@ class DynamicRoutingEnvironment(RoutingEnvironment):
         start=-(tail+2+nodes)
         return start,start+nodes,start+nodes+1
 
+    def predictive_deadline_node(self, state=None, mask=None):
+        """Return the fixed PDH action from delivered predictive information.
+
+        This deliberately contains no learned action-value network.  It is the
+        standalone predictive heuristic against which the RL policy is tested.
+        """
+        if not self.deadline_aware:
+            raise RuntimeError('Predictive deadline routing requires deadline-aware state')
+        if state is None or mask is None:
+            state,mask=self.state()
+        start,_,_=self.deadline_layout()
+        start=len(state)+start if start<0 else start
+        prior=state[start:start+len(self.node_ids)]
+        legal=np.flatnonzero(mask)
+        choice=min(legal,key=lambda index:(float(prior[index]),self.node_ids[index]))
+        return self.node_ids[int(choice)]
+
+    def predictive_budget_node(self, state=None, mask=None):
+        """Myopic DPP benchmark with the same prediction and budget information.
+
+        The smooth deadline proxy has a 10 ms transition width and is divided
+        by the known DAG stage count.  It estimates the current request only;
+        it does not learn the action's impact on later requests or queues.
+        """
+        if not self.average_resource_budget or not self.deadline_aware:
+            raise RuntimeError('Predictive myopic DPP requires budget and deadline state')
+        if state is None or mask is None:state,mask=self.state()
+        nodes=len(self.node_ids);start=nodes*(self.codec.latent_dim+2)
+        latency=state[start:start+nodes]
+        _,budget_index,_=self.deadline_layout()
+        budget=state[budget_index]
+        stage=self._routable_stage();task=self.scenario.tasks[stage.request.task]
+        resource_ref,data_ref=self._cost_reference(stage.request.task,stage.request.gateway)
+        costs=[self.incremental_costs(stage,node) for node in self.node_ids]
+        resource=np.asarray([c[0]/max(resource_ref,1e-12) for c in costs])
+        data=np.asarray([c[1]/max(data_ref,1e-12) for c in costs])
+        success=1./(1.+np.exp(np.clip((latency-budget)/.2,-40,40)))
+        score=success/len(task.order)-(self.cost_virtual_queue/self.dpp_v)*resource
+        score-=self.dpp_data_weight*data
+        legal=np.flatnonzero(mask)
+        choice=min(legal,key=lambda index:(-float(score[index]),float(latency[index]),self.node_ids[index]))
+        return self.node_ids[int(choice)]
+
     def greedy_node(self):
         self.update_telemetry()
         stage=self._routable_stage();service=self.scenario.services[stage.service]
@@ -650,6 +695,10 @@ class DynamicRoutingEnvironment(RoutingEnvironment):
             'budget_cost_sum':self.budget_cost_sum,
             'budget_reference_sum':self.budget_reference_sum,
             'budget_cost_ratio':self.budget_cost_sum/self.budget_reference_sum if self.budget_reference_sum else None,
+            'budget_feasible':((self.budget_cost_sum/self.budget_reference_sum<=self.average_resource_budget+1e-6)
+                if self.average_resource_budget and self.budget_reference_sum else None),
+            'budget_violation':(max(0.,self.budget_cost_sum/self.budget_reference_sum-self.average_resource_budget)
+                if self.average_resource_budget and self.budget_reference_sum else None),
             'cost_virtual_queue_final':self.cost_virtual_queue,
             'cost_virtual_queue_peak':self.cost_virtual_queue_peak,
             'cost_virtual_queue_trace':self.budget_trace,

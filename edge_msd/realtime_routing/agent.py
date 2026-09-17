@@ -25,15 +25,31 @@ class DuelingQNet(nn.Module):
         h = self.trunk(self.input_norm(state))
         adv = self.advantage(h)
         logits = self.value(h) + adv - adv.mean(-1, keepdim=True)
-        start=getattr(self,'route_cost_start',None)
-        if start is not None:
-            bound=getattr(self,'route_residual_bound',None)
-            if bound is not None:
-                logits=self.value(h)+bound*torch.tanh(adv-adv.mean(-1,keepdim=True))
-            # Predicted stage latency supplies an initial routing preference;
-            # the learned residual estimates full-request SLA outcomes.
-            logits=logits-2.*state[...,start:start+adv.shape[-1]]
         return logits
+
+
+class CandidateDuelingQNet(DuelingQNet):
+    """Learned shared candidate score with explicitly aligned node features."""
+    def __init__(self,state_dim,action_dim,latent_dim,include_costs=False,hidden=64):
+        super().__init__(state_dim,action_dim,hidden)
+        self.actions,self.latent_dim=action_dim,latent_dim
+        self.node_blocks=7 if include_costs else 5
+        local_dim=latent_dim+self.node_blocks
+        self.advantage=nn.Sequential(nn.Linear(hidden+local_dim+action_dim,hidden),
+                                    nn.ReLU(),nn.Linear(hidden,1))
+        self.register_buffer('node_identity',torch.eye(action_dim))
+
+    def forward(self,state):
+        normalized=self.input_norm(state)
+        h=self.trunk(normalized)
+        nodes=self.actions;start=nodes*self.latent_dim
+        latent=normalized[...,:start].reshape(*state.shape[:-1],nodes,self.latent_dim)
+        fields=normalized[...,start:start+nodes*self.node_blocks].reshape(
+            *state.shape[:-1],self.node_blocks,nodes).transpose(-1,-2)
+        identity=self.node_identity.expand(*state.shape[:-1],nodes,nodes)
+        context=h.unsqueeze(-2).expand(*state.shape[:-1],nodes,h.shape[-1])
+        adv=self.advantage(torch.cat((context,latent,fields,identity),dim=-1)).squeeze(-1)
+        return self.value(h)+adv-adv.mean(-1,keepdim=True)
 
 
 class DoubleDQNAgent:

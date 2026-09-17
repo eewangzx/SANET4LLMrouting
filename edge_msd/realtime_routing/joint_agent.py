@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from edge_msd.realtime_routing.agent import DoubleDQNAgent
+from edge_msd.realtime_routing.agent import DoubleDQNAgent,CandidateDuelingQNet
 
 
 def gradient_norm(parameters):
@@ -33,8 +33,13 @@ def terminal_utility(request,deadline_ms,latency_weight=0.,resource_weight=0.,da
 
 class JointRoutingAgent(DoubleDQNAgent):
     def __init__(self, state_dim, action_dim, codec, reward_scale,
-                 hidden=64, lr=3e-5, prediction_weight=.1, device='cpu',train_codec=True):
+                 hidden=64, lr=3e-5, prediction_weight=.1, device='cpu',train_codec=True,
+                 candidate_features=False,include_route_costs=False):
         super().__init__(state_dim,action_dim,hidden=hidden,lr=lr,gamma=1.,device=device)
+        if candidate_features:
+            self.online=CandidateDuelingQNet(state_dim,action_dim,codec.latent_dim,
+                include_costs=include_route_costs,hidden=hidden).to(device)
+            self.target=deepcopy(self.online).requires_grad_(False)
         self.train_codec=train_codec
         self.codec=codec.to(device).eval().requires_grad_(train_codec)
         self.target_codec=deepcopy(codec).eval().requires_grad_(False)
@@ -47,7 +52,6 @@ class JointRoutingAgent(DoubleDQNAgent):
         self.route_cost_state=False
         self.global_return=False
         self.budget_state=False
-        self.deadline_layout=None
         self._episode_utilities=[]
         self.parameters=list(self.online.parameters())+(list(self.codec.parameters()) if train_codec else [])
         self.opt=torch.optim.Adam(self.parameters,lr=lr)
@@ -70,14 +74,6 @@ class JointRoutingAgent(DoubleDQNAgent):
             pressure,costs=forecast_costs(decoded,[o[2] for o in observations],codec.sample_ms)
             start=nodes*codec.latent_dim
             state=torch.cat((state[:,:start+nodes],pressure,costs,state[:,start+3*nodes:]),dim=-1)
-            if self.deadline_layout is not None:
-                # Recompute the deadline-aware prior block from the recomputed
-                # forecast costs so that codec gradients also flow through it.
-                from edge_msd.realtime_routing.dynamic_routing import deadline_prior
-                ps,bi,di=self.deadline_layout
-                deployed=torch.as_tensor(np.stack([o[2]['deployed'] for o in observations]),device=self.device)
-                prior,doomed=deadline_prior(costs,state[:,start:start+nodes],state[:,bi],deployed)
-                state=torch.cat((state[:,:ps],prior,state[:,bi:bi+1],doomed[:,None],state[:,di+1:]),dim=-1)
         targets=None
         if labels:
             target_empty=np.zeros((codec.horizon,codec.targets),np.float32)
@@ -115,6 +111,7 @@ class JointRoutingAgent(DoubleDQNAgent):
         s,z,scores,valid,targets=self.embed(observations,self.codec,labels=True)
         a=torch.as_tensor([b[1] for b in batch],device=self.device)
         reward=torch.as_tensor([b[2] for b in batch],dtype=torch.float32,device=self.device)
+        if self.global_return:reward=reward/self.reward_scale
         masks=torch.as_tensor(np.stack([b[4] for b in batch]),device=self.device)
         done=torch.as_tensor([b[5] for b in batch],dtype=torch.float32,device=self.device)
         with torch.no_grad():

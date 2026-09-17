@@ -15,16 +15,11 @@ class RoutingActorCritic(nn.Module):
         self.trunk=nn.Sequential(nn.Linear(state_dim,hidden),nn.ReLU(),
                                  nn.Linear(hidden,hidden),nn.ReLU())
         self.advantage=nn.Linear(hidden,actions);self.value=nn.Linear(hidden,1)
-        self.route_cost_start=None;self.route_residual_bound=.25
         self.temperature=temperature
 
     def forward(self,state):
         hidden=self.trunk(self.input_norm(state))
         logits=self.advantage(hidden)
-        logits=self.route_residual_bound*torch.tanh(logits-logits.mean(-1,keepdim=True))
-        if self.route_cost_start is not None:
-            start=self.route_cost_start
-            logits=logits-2*state[...,start:start+logits.shape[-1]]
         return logits/self.temperature,self.value(hidden).squeeze(-1).sigmoid()
 
 

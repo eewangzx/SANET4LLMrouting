@@ -112,4 +112,31 @@ def test_average_budget_queue_updates_on_the_selected_stage():
     assert env.budget_cost_sum>0 and env.budget_reference_sum>0
     assert np.isclose(reward,.5*info['raw_sla_reward']-.05*env.last_data_increment)
     assert state[-1]==0.
-    if not env.terminated:assert np.isclose(env.state()[0][-1],env.cost_virtual_queue)
+    if not env.terminated:assert np.isclose(env.state()[0][-1],np.log1p(env.cost_virtual_queue))
+
+
+def test_chronological_credit_reaches_other_requests_after_same_ms_decisions():
+    from scripts.run_joint_routing import chronological_replay
+    # A and B are routed at the same physical time; B's success settles only
+    # after the third decision advances time. A's replay must see that system
+    # reward too, unlike same-request terminal credit or a one-action target.
+    tau=100.
+    path=[('A',0,0.,'B',np.ones(2),0.,1.,0.),
+          ('B',1,0.,'C',np.ones(2),0.,1.,0.),
+          ('C',0,1.,'D',np.ones(2),0.,np.exp(-2/tau),2.),
+          ('D',1,2.,'end',np.ones(2),1.,np.exp(-3/tau),3.)]
+    replay=chronological_replay(path,n_step=1,min_elapsed_ms=2.,return_time_ms=tau)
+    assert np.isclose(replay[0][2],1.) and replay[0][3]=='D'
+    assert np.isclose(replay[1][2],1.) and replay[1][3]=='D'
+    assert np.isclose(replay[0][6],np.exp(-2/tau))
+    assert replay[-1][5]==1. and np.isclose(replay[-1][2],2.)
+
+
+def test_candidate_q_has_no_hardcoded_latency_or_cost_action_prior():
+    from edge_msd.realtime_routing.agent import CandidateDuelingQNet
+    net=CandidateDuelingQNet(38,3,4,include_costs=True,hidden=16)
+    state=torch.randn(2,38)
+    with torch.no_grad():
+        net.advantage[-1].weight.zero_();net.advantage[-1].bias.zero_()
+    q=net(state)
+    torch.testing.assert_close(q,q[:,:1].expand_as(q))

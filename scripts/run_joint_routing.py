@@ -47,7 +47,23 @@ def mean_objective_utility(env,latency_weight,resource_weight,data_weight):
     return float(np.mean(values)) if values else None
 
 
-def collect(env,agent=None,epsilon=0.,buffer=None,n_step=3,policy='greedy'):
+def chronological_replay(path,n_step,min_elapsed_ms,return_time_ms):
+    """Credit all requests over a physical-time horizon, not a few same-ms actions."""
+    times=np.concatenate(([0.],np.cumsum([row[7] for row in path])))
+    returns=np.zeros(len(path)+1,np.float64)
+    for i in range(len(path)-1,-1,-1):
+        returns[i]=path[i][2]+path[i][6]*returns[i+1]
+    result=[]
+    for i,row in enumerate(path):
+        end=min(len(path),max(i+n_step,int(np.searchsorted(times,times[i]+min_elapsed_ms))))
+        last=path[end-1]
+        discount=math.exp(-(times[end]-times[i])/return_time_ms)
+        reward=returns[i]-discount*returns[end]
+        result.append((row[0],row[1],float(reward),last[3],last[4],last[5],discount))
+    return result
+
+
+def collect(env,agent=None,epsilon=0.,buffer=None,n_step=3,policy='greedy',n_step_ms=10.):
     env.reset();total=0.;decisions=0;trajectories={};global_path=[]
     policy_rng=np.random.default_rng(np.random.SeedSequence([env.settings.seed,901]))
     while not env.terminated:
@@ -58,6 +74,10 @@ def collect(env,agent=None,epsilon=0.,buffer=None,n_step=3,policy='greedy'):
             if policy=='random':
                 action=int(policy_rng.choice(np.flatnonzero(mask)))
                 node=env.node_ids[action]
+            elif policy in ('predictive_deadline','predictive_budget'):
+                node=(env.predictive_budget_node(state,mask) if policy=='predictive_budget'
+                      else env.predictive_deadline_node(state,mask))
+                action=env.node_ids.index(node)
             else:
                 node=env.shortest_queue_node() if policy=='shortest_queue' else env.greedy_node()
                 action=env.node_ids.index(node)
@@ -73,17 +93,12 @@ def collect(env,agent=None,epsilon=0.,buffer=None,n_step=3,policy='greedy'):
                 else:
                     s2,m2=env.state();nxt=env.learning_observation(s2)
                 discount=math.exp(-info['elapsed_ms']/agent.return_time_ms)
-                global_path.append((obs,action,reward,nxt,m2,float(term),discount))
+                global_path.append((obs,action,reward,nxt,m2,float(term),discount,info['elapsed_ms']))
             else:trajectories.setdefault(request.id,[]).append((obs,action,mask))
     env.update_telemetry()
     if buffer is not None:
         if agent.global_return:
-            for i,row in enumerate(global_path):
-                reward=0.;discount=1.;end=row
-                for end in global_path[i:i+n_step]:
-                    reward+=discount*end[2];discount*=end[6]
-                    if end[5]:break
-                buffer.append((row[0],row[1],reward,end[3],end[4],end[5],discount))
+            buffer.extend(chronological_replay(global_path,n_step,n_step_ms,agent.return_time_ms))
             return total,decisions
         for request in env.requests:
             utility=request_utility(env,agent,request)
@@ -101,7 +116,8 @@ def collect(env,agent=None,epsilon=0.,buffer=None,n_step=3,policy='greedy'):
 
 def main():
     p=argparse.ArgumentParser()
-    p.add_argument('--bench',choices=['proposed','decoded_separate','latency_only','greedy','random','shortest_queue'],required=True,
+    p.add_argument('--bench',choices=['proposed','decoded_separate','predictive_deadline','predictive_budget',
+                   'latency_only','greedy','random','shortest_queue'],required=True,
                    help='latency_only is cost-unaware myopic routing; greedy is its legacy alias')
     p.add_argument('--algorithm',choices=['dqn','ppo'],default='dqn')
     p.add_argument('--ppo-epochs',type=int,default=4)
@@ -114,9 +130,8 @@ def main():
     p.add_argument('--codec-init',type=Path,default=Path('runs/icc_coupled_models/importance.pt'))
     p.add_argument('--joint-init',type=Path)
     p.add_argument('--fresh-q',action='store_true')
-    p.add_argument('--predictive-cost-prior',action='store_true')
-    p.add_argument('--route-residual-bound',type=float,default=.25,
-                   help='action-logit residual bound; zero allows an unrestricted learned correction')
+    p.add_argument('--predictive-cost-prior',action='store_true',
+                   help=argparse.SUPPRESS)
     p.add_argument('--lr',type=float,default=3e-5)
     p.add_argument('--task-prediction',action='store_true')
     p.add_argument('--end-to-end-forecast',action='store_true')
@@ -140,6 +155,8 @@ def main():
     p.add_argument('--episodes',type=int,default=16)
     p.add_argument('--updates-per-episode',type=int,default=1000)
     p.add_argument('--n-step',type=int,default=3)
+    p.add_argument('--n-step-ms',type=float,default=10.,
+                   help='minimum physical-time credit horizon for chronological budget training')
     p.add_argument('--prediction-weight',type=float,default=1.)
     p.add_argument('--test-seeds',default='55000,55001,55002')
     p.add_argument('--validation-seeds',default='')
@@ -147,12 +164,12 @@ def main():
     p.add_argument('--exclude-initial-selection',action='store_true')
     p.add_argument('--seed',type=int,default=7)
     p.add_argument('--epsilon-start',type=float,default=1.)
-    p.add_argument('--deadline-aware-prior',action='store_true',
-                   help='requests predicted to exceed the heuristic remaining time budget are steered to the most loaded node; requires --predictive-cost-prior')
+    p.add_argument('--deadline-aware-prior',action='store_true',help=argparse.SUPPRESS)
     p.add_argument('--buffer-cap',type=int,default=0,help='keep only the newest transitions (0: unbounded replay)')
     args=p.parse_args()
     learned=args.bench in ('proposed','decoded_separate')
     separate=args.bench=='decoded_separate'
+    predictive_baseline=args.bench in ('predictive_deadline','predictive_budget')
     if separate and (args.algorithm!='dqn' or args.joint_init or args.end_to_end_forecast):
         p.error('decoded_separate uses DQN and an independently pretrained frozen --codec-init, without --joint-init or --end-to-end-forecast')
     if args.report_ms <= 0 or args.report_bps <= 0 or args.warmup_ms < 0:
@@ -174,12 +191,16 @@ def main():
         p.error('DPP V, physical return time and learning rate must be positive and finite')
     if args.average_resource_budget and (separate or args.algorithm!='dqn' or args.resource_cost_weight):
         p.error('average-budget training uses joint DQN and queue-weighted resource cost, without a fixed resource weight')
-    if not math.isfinite(args.route_residual_bound) or args.route_residual_bound<0:
-        p.error('route residual bound must be finite and nonnegative')
-    if args.deadline_aware_prior and (not args.predictive_cost_prior or separate):
-        p.error('--deadline-aware-prior requires --predictive-cost-prior on the joint proposed method')
-    if args.exclude_initial_selection and not args.validation_seeds:
-        p.error('--exclude-initial-selection requires validation seeds')
+    if args.n_step<1 or not math.isfinite(args.n_step_ms) or args.n_step_ms<0:
+        p.error('n-step count must be positive and physical-time horizon nonnegative')
+    if args.predictive_cost_prior or args.deadline_aware_prior:
+        p.error('action priors are an independent baseline; use --bench predictive_deadline')
+    if args.bench=='predictive_budget' and not args.average_resource_budget:
+        p.error('predictive_budget requires an average resource budget')
+    if args.joint_init and not (learned or predictive_baseline):
+        p.error('--joint-init is meaningful only for learned or predictive policies')
+    if learned and (args.episodes<1 or args.updates_per_episode<1):
+        p.error('a learned method requires at least one episode and one update per episode')
     torch.set_num_threads(1);torch.set_num_interop_threads(1)
     random.seed(args.seed);np.random.seed(args.seed);torch.manual_seed(args.seed)
     scenario=load_scenario(args.dataset,args.load)
@@ -189,8 +210,11 @@ def main():
                       ec_admission_window_ms=1,record_trace=True)
     telemetry=TelemetrySettings(arrival_ms=args.arrival_ms,control_ms=1,
         report_ms=args.report_ms,report_bps=args.report_bps,dynamic=True)
-    codec=load_codec(args.codec_init).eval().requires_grad_(not separate) if learned else CurrentMeasurementCodec()
-    report_state_dim=codec.horizon*codec.targets if separate else codec.latent_dim
+    codec=(load_codec(args.codec_init).eval().requires_grad_(learned and not separate)
+           if learned or predictive_baseline else CurrentMeasurementCodec())
+    if predictive_baseline and args.joint_init:
+        predictive_checkpoint=torch.load(args.joint_init,map_location='cpu',weights_only=True)
+        codec.load_state_dict(predictive_checkpoint['codec'])
     def world(seed,training=False,split='test'):
         return DynamicRoutingEnvironment(scenario,settings,placement,codec,telemetry,
                  seed=seed,drain_ms=args.drain_ms,record_training=training,warmup_ms=args.warmup_ms,
@@ -200,7 +224,7 @@ def main():
                  state_representation='forecast' if separate else 'latent',
                  include_route_costs=bool(args.resource_cost_weight or args.data_cost_weight or args.average_resource_budget),
                  average_resource_budget=args.average_resource_budget,dpp_v=args.dpp_v,
-                 data_cost_weight=args.data_cost_weight,deadline_aware=args.deadline_aware_prior)
+                 data_cost_weight=args.data_cost_weight,deadline_aware=predictive_baseline)
     root=args.output;root.mkdir(parents=True,exist_ok=True)
     started=time.perf_counter()
     def write(name,value):
@@ -217,7 +241,9 @@ def main():
         p.error('validation seeds must be separate from train and test seeds')
     if set(test_seeds)&set(train_seeds):
         p.error('test seeds must be separate from training seeds')
-    reward_scale=1.
+    arrival_rate_per_ms=sum(sum(user.rates_per_second.values()) for user in scenario.users)/1000.
+    reward_scale=(max(1.,arrival_rate_per_ms*max(args.n_step_ms,1.))
+                  if args.average_resource_budget else 1.)
     stage_demand=Counter()
     for user in scenario.users:
         for task,rate in user.rates_per_second.items():
@@ -230,6 +256,7 @@ def main():
        'codec':codec.config(),'state_dim':len(state),'hidden':64,'gamma':1.,'lr':args.lr,
        'algorithm':args.algorithm,
        'reward_scale':reward_scale,'n_step':args.n_step,
+       'reward_scale_definition':'a common factor for both SLA and shadow-priced cost; expected arrivals per physical credit window',
        'trajectory':'successive node choices of the SAME request, through its complete DAG',
        'critic':'eventual request SLA-success probability; bounded sigmoid value',
        'objective':'maximize mean request SLA success; equivalent to mean terminal +1/-1',
@@ -241,7 +268,7 @@ def main():
            'resource_weight':args.resource_cost_weight,
            'data_weight':args.data_cost_weight},
        'train_seeds':train_seeds,'test_seeds':test_seeds,'validation_seeds':validation_seeds,
-       'model_selection':'validation SLA; mean completed latency breaks ties; initial checkpoint eligible' if validation_seeds else 'last episode',
+       'model_selection':'validation SLA; mean completed latency breaks ties; only checkpoints after RL updates are eligible' if validation_seeds else 'last episode',
        'training':f'joint task TD loss + {args.prediction_weight} * predictive MSE/budget loss' if args.bench=='proposed' else 'none',
        'state_fields':['delivered_latent','current_service_backlog','unfinished_DAG_queue_summary',
                        'received_forecast_stage_latency','incremental_resource_cost',
@@ -257,7 +284,9 @@ def main():
        'remaining_DAG_pressure':'known waiting stages by input locality plus mean assigned reservations, normalized by instance count; light work uses delivered next-50ms availability; log1p scaling',
        'mean_stage_arrivals_per_ms':dict(stage_demand),
        'core_discrete_execution_upper_capacity_per_ms':core_capacity,
-       'load_regime':'finite Poisson arrival burst; workload doubled versus load=0.4; average offered demand can exceed service capacity',
+       'core_offered_utilization':{service:stage_demand[service]/capacity
+                                  for service,capacity in core_capacity.items()},
+       'load_regime':'finite Poisson arrival trace; offered core utilization is recorded explicitly',
        'source_sha256':{str(f):hashlib.sha256(f.read_bytes()).hexdigest() for f in (
            Path('scripts/run_joint_routing.py'),Path('edge_msd/realtime_routing/joint_agent.py'),
            Path('edge_msd/realtime_routing/ppo_agent.py'),
@@ -270,12 +299,34 @@ def main():
             'information':'latest delivered raw current measurements and the dispatch/completion ledger',
             'prediction':False,'resource_cost_considered':False,'data_cost_considered':False,
             'average_budget_considered':False,'oracle':False}
+    if predictive_baseline:
+        budget_myopic=args.bench=='predictive_budget'
+        manifest['method_name']=('Predictive Myopic DPP (PM-DPP)' if budget_myopic
+                                 else 'Predictive Deadline-aware Heuristic (PDH)')
+        manifest['baseline_definition']={
+            'decision':('maximize smooth predicted deadline-success proxy / DAG stage count minus '
+                        'current cost-queue shadow price times incremental resource charge' if budget_myopic else
+                       ('minimum received predicted stage latency for requests within the heuristic '
+                        'remaining-time budget; route deadline-risky requests to the most congested '
+                        'legal node to protect scarce low-backlog capacity')),
+            'information':'the same delivered predictive codec reports and dispatch/completion ledger used by Proposed',
+            'prediction':True,'reinforcement_learning':False,
+            'resource_cost_considered':budget_myopic,'data_cost_considered':budget_myopic,
+            'average_budget_considered':budget_myopic,'oracle':False}
+        manifest['deadline_risk_semantics']=('remaining deadline minus heuristic unfinished-DAG processing work; '
+            'a risk classifier, not a feasibility proof')
+        manifest['state_fields']=[*manifest['state_fields'][:-2],
+            'deadline_prior_cost','deadline_budget','deadline_risk',*manifest['state_fields'][-2:]]
+        manifest['codec_init_sha256']=hashlib.sha256(args.codec_init.read_bytes()).hexdigest()
+        if args.joint_init:
+            manifest['joint_init_sha256']=hashlib.sha256(args.joint_init.read_bytes()).hexdigest()
+            manifest['joint_init_note']='use the selected Proposed codec only; no learned routing parameters loaded'
     if not (args.resource_cost_weight or args.data_cost_weight or args.average_resource_budget):
         manifest['state_fields']=[name for name in manifest['state_fields']
                                   if name not in ('incremental_resource_cost','incremental_data_cost')]
     if args.azure_trace:
         manifest['azure_asset_sha256']=hashlib.sha256(args.azure_trace.read_bytes()).hexdigest()
-        manifest['load_regime']='same ICC driving Poisson arrivals; Azure background workload dynamics'
+        manifest['load_regime']='ICC task Poisson arrivals at the recorded load; Azure background workload dynamics'
         manifest['azure_time_mapping']='5 real seconds per 5 simulation milliseconds; chronological 4/1/2 day split'
     if args.latency_weight:
         manifest.update(critic='bounded expected full-request SLA/delay utility',
@@ -304,14 +355,15 @@ def main():
             update_schedule='prediction pretraining first; freeze encoder/importance/predictor; then train Q only',
             training_access='RL receives only actor state; no source histories or future labels',
             state_fields=['delivered_decoded_forecast',*manifest['state_fields'][1:]])
-    if args.exclude_initial_selection:
-        manifest['model_selection']=manifest['model_selection'].replace(
-            'initial checkpoint eligible','only checkpoints after RL updates eligible')
     if learned:
+        manifest['model_selection']=manifest['model_selection'].replace(
+            'initial checkpoint eligible','only checkpoints after RL updates are eligible')
         device='cuda' if torch.cuda.is_available() else 'cpu'
         torch.manual_seed(args.seed)
         agent_cls=JointPPOAgent if args.algorithm=='ppo' else JointRoutingAgent
-        extra={'temperature':args.ppo_temperature} if args.algorithm=='ppo' else {'train_codec':not separate}
+        extra=({'temperature':args.ppo_temperature} if args.algorithm=='ppo' else
+               {'train_codec':not separate,'candidate_features':not separate,
+                'include_route_costs':bool(args.resource_cost_weight or args.data_cost_weight or args.average_resource_budget)})
         agent=agent_cls(len(state),len(example.node_ids),codec,reward_scale,
                     lr=args.lr,prediction_weight=args.prediction_weight,device=device,**extra)
         agent.latency_weight=args.latency_weight
@@ -335,31 +387,18 @@ def main():
             manifest['joint_init_note']='prior joint codec; fresh decision network' if args.fresh_q or not matching else 'continue prior joint model; fresh optimizer'
             if args.ppo_warm_start:
                 manifest['joint_init_note']='joint codec and actor warm-started from trained DQN; same initial masked routing argmax'
-        residual=(f'{args.route_residual_bound}*tanh(action residual)'
-                  if args.route_residual_bound else 'unrestricted action residual')
-        if args.predictive_cost_prior:
-            for net in (agent.online,agent.target):
-                net.route_cost_start=len(example.node_ids)*(report_state_dim+2)
-                net.route_residual_bound=args.route_residual_bound or None
-            if args.deadline_aware_prior:
-                layout=tuple(len(state)+index for index in example.deadline_layout())
-                agent.deadline_layout=layout
-                for net in (agent.online,agent.target):net.route_cost_start=layout[0]
-                manifest['deadline_aware_prior']=('predicted slack = remaining deadline - heuristic unfinished processing work - '
-                    'fastest predicted stage latency; if negative the prior steers to the most loaded legal node')
-                manifest['state_fields']=[*manifest['state_fields'][:-2],'deadline_prior_cost','deadline_budget','doomed',*manifest['state_fields'][-2:]]
-            if separate or args.fresh_q or (args.algorithm=='ppo' and not matching and not args.ppo_warm_start):
-                for head in (agent.online.value,agent.online.advantage):
-                    torch.nn.init.zeros_(head.weight);torch.nn.init.zeros_(head.bias)
-                agent.target.load_state_dict(agent.online.state_dict())
-            prior_description='deadline-aware routing prior' if args.deadline_aware_prior else 'predicted stage latency / 50ms'
-            manifest['q_parameterization']=f'sigmoid of state value + {residual} - 2 * {prior_description}'
+        manifest['q_parameterization']=('state value + unrestricted shared learned candidate advantage'
+            if not separate and args.algorithm=='dqn' else 'state value + unrestricted learned action advantage')
+        if not separate and args.algorithm=='dqn':
+            manifest['candidate_features']='aligned node Z, backlog, downstream pressure, predicted latency, optional resource/data charges, report age/missing and static node identity; shared Q scoring conditioned on global state'
+        manifest['policy_role']=('the predictor supplies compact future-state information; the learned policy alone '
+            'maps that state, current queues, action costs and the virtual budget queue to routing actions')
         if args.algorithm=='ppo':
             manifest.pop('q_parameterization',None)
             manifest.update(critic='sigmoid state value with Monte Carlo terminal SLA targets and MSE',
                 n_step=None,
                 training='clipped PPO surrogate + 0.5 value MSE - 0.001 entropy + weighted forecast/budget',
-                policy_parameterization=f'masked softmax of ({residual} - 2*{prior_description})/temperature' if args.predictive_cost_prior else 'masked learned action logits / temperature',
+                policy_parameterization='masked learned action logits / temperature',
                 ppo_clip_ratio=.2,ppo_temperature=args.ppo_temperature,ppo_epochs=args.ppo_epochs,
                 ppo_batch_size=args.ppo_batch_size,trajectory_return='same-request terminal success, gamma=1 lambda=1',
                 replay='current episode only; fixed old log-probabilities and advantages')
@@ -389,14 +428,14 @@ def main():
             objective='maximize SLA success rate minus weighted MB-hop, subject to average resource budget',
             average_resource_budget=args.average_resource_budget,dpp_v=args.dpp_v,
             return_time_ms=args.return_time_ms,
+            n_step_ms=args.n_step_ms,
             cost_queue='Q_next=max(0,Q+normalized stage charge-budget_fraction*maximum legal stage charge)',
             reward='0.5*system SLA +/-1 settlements - (Q_before/V)*budget_increment - data_weight*incremental normalized MB-hop',
             budget_accounting='credit only for dispatched stages; full DAG credits sum to one request budget; no credit for un-dispatched pending work',
             model_selection='validation budget feasibility first, then SLA-minus-data objective; least violation if no feasible checkpoint; initial checkpoint excluded',
-            q_parameterization=(f'state value + {residual} - 2 * {prior_description}'
-                if learned and args.predictive_cost_prior else
-                ('state value + action advantage' if learned else 'no Q network; fixed heuristic policy')),
-            state_fields=[*manifest['state_fields'],'cost_virtual_queue_divided_by_V'])
+            q_parameterization=('state value + unrestricted shared learned candidate advantage'
+                if learned else 'no Q network; fixed heuristic policy'),
+            state_fields=[*manifest['state_fields'],'log1p_cost_virtual_queue_divided_by_V'])
         manifest.pop('route_cost_priority',None)
     write('manifest.json',manifest)
     print('START',args.bench,json.dumps(manifest),flush=True)
@@ -462,14 +501,16 @@ def main():
                                     'selected_episode':best_episode})
             write('validation.json',validation_rows)
             print('VALIDATION',episode,'sla',sla,'best_episode',best_episode,flush=True)
-        if validation_seeds:validate(0,not args.exclude_initial_selection)
+        # Episode zero is useful only as a diagnostic of random initialization.
+        # It can never be selected or reported as evidence of learned routing.
+        if validation_seeds:validate(0,False)
         for episode,seed in enumerate(train_seeds,1):
             epsilon=max(.05,args.epsilon_start*(1-(episode-1)/(.6*args.episodes)))
             env=world(seed,training=True)
             if args.algorithm=='ppo':
                 epsilon=0.;reward,decisions,rollout=collect_ppo(env,agent)
             else:
-                reward,decisions=collect(env,agent,epsilon,buffer,args.n_step)
+                reward,decisions=collect(env,agent,epsilon,buffer,args.n_step,n_step_ms=args.n_step_ms)
                 if args.buffer_cap and len(buffer)>args.buffer_cap:del buffer[:len(buffer)-args.buffer_cap]
             diagnostics=env.diagnostics();write(f'train_{episode:02d}.json',diagnostics)
             if args.algorithm=='ppo':
