@@ -119,9 +119,9 @@ def main():
             feasible='yes' if r['budget_feasible'] else 'no'))
     lines+=['','RL contribution at the same budget (both policies must be feasible):','']
     for budget in budgets:
-        proposed=next(r for r in rows if r['bench']=='proposed' and r['nominal_budget']==budget)
+        proposed=next((r for r in rows if r['bench']=='proposed' and r['nominal_budget']==budget),None)
         myopic=next((r for r in rows if r['bench']=='predictive_budget' and r['nominal_budget']==budget),None)
-        if myopic:
+        if proposed and myopic:
             eligible=proposed['budget_feasible'] and myopic['budget_feasible']
             lines.append('- B={:.2f}: Proposed minus PM-DPP SLA {:+.2f} pp; charge {:+.4f}; both feasible: {}.'.format(
                 budget,100*(proposed['sla']-myopic['sla']),proposed['resource_charge']-myopic['resource_charge'],eligible))

@@ -54,7 +54,7 @@ def main():
     command=[python,'-u','scripts/run_joint_routing.py','--bench','decoded_separate',
         '--algorithm','dqn','--output',str(root/'decoded_separate'),
         '--placement',str(reference/'fixed_placement.json'),'--dataset',str(reference/'scenario.json'),
-        '--codec-init',str(root/'forecast_codec/importance.pt'),'--fresh-q','--predictive-cost-prior',
+        '--codec-init',str(root/'forecast_codec/importance.pt'),'--fresh-q',
         '--episodes','48','--updates-per-episode','1000','--epsilon-start','0.05',
         '--train-seed-base',str(original['train_seeds'][0]),
         '--validation-seeds',','.join(map(str,original['validation_seeds'])),

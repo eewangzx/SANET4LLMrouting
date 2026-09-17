@@ -52,6 +52,13 @@ SLA (and the explicitly configured data objective, if nonzero). Train,
 validation and test seeds are distinct. Finite-trace budget violations and
 pending requests are reported explicitly rather than hidden by raw SLA.
 
+Average-budget PPO uses the same system rewards and budget queue. Its shared
+candidate actor normalizes each node's latent input and learns unrestricted
+logits; its critic regresses unbounded system returns with smooth-L1 loss.
+GAE discounts by elapsed physical time, with a trace time of one quarter of
+the return time. The entire business reward uses the same common scaling as
+DQN. PPO has no fixed predictive action prior.
+
 ## Why sequential learning can help
 
 Routing changes future per-instance backlog, DAG locality and the budget

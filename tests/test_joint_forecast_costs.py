@@ -140,3 +140,11 @@ def test_candidate_q_has_no_hardcoded_latency_or_cost_action_prior():
         net.advantage[-1].weight.zero_();net.advantage[-1].bias.zero_()
     q=net(state)
     torch.testing.assert_close(q,q[:,:1].expand_as(q))
+
+
+def test_budget_ppo_credits_other_requests_and_scales_both_objectives():
+    from edge_msd.realtime_routing.ppo_agent import chronological_ppo_rollout
+    path=[('A',0,0.,0.,np.ones(2),-2.,0.),
+          ('B',1,0.,0.,np.ones(2),3.,2.)]
+    rows=chronological_ppo_rollout(path,reward_scale=2.,return_time_ms=100.)
+    assert np.isclose(rows[0][3],.5) and np.isclose(rows[1][3],1.5)

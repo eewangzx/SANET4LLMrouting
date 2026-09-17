@@ -39,7 +39,7 @@ class CandidateDuelingQNet(DuelingQNet):
                                     nn.ReLU(),nn.Linear(hidden,1))
         self.register_buffer('node_identity',torch.eye(action_dim))
 
-    def forward(self,state):
+    def candidate_advantage(self,state):
         normalized=self.input_norm(state)
         h=self.trunk(normalized)
         nodes=self.actions;start=nodes*self.latent_dim
@@ -49,6 +49,10 @@ class CandidateDuelingQNet(DuelingQNet):
         identity=self.node_identity.expand(*state.shape[:-1],nodes,nodes)
         context=h.unsqueeze(-2).expand(*state.shape[:-1],nodes,h.shape[-1])
         adv=self.advantage(torch.cat((context,latent,fields,identity),dim=-1)).squeeze(-1)
+        return h,adv
+
+    def forward(self,state):
+        h,adv=self.candidate_advantage(state)
         return self.value(h)+adv-adv.mean(-1,keepdim=True)
 
 

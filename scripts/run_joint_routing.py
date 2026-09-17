@@ -189,8 +189,8 @@ def main():
         p.error('average resource budget must be in [0,1]; zero disables')
     if args.dpp_v<=0 or args.return_time_ms<=0 or args.lr<=0 or not math.isfinite(args.dpp_v+args.return_time_ms+args.lr):
         p.error('DPP V, physical return time and learning rate must be positive and finite')
-    if args.average_resource_budget and (separate or args.algorithm!='dqn' or args.resource_cost_weight):
-        p.error('average-budget training uses joint DQN and queue-weighted resource cost, without a fixed resource weight')
+    if args.average_resource_budget and (separate or args.resource_cost_weight):
+        p.error('average-budget training uses joint system returns and queue-weighted resource cost, without a fixed resource weight')
     if args.n_step<1 or not math.isfinite(args.n_step_ms) or args.n_step_ms<0:
         p.error('n-step count must be positive and physical-time horizon nonnegative')
     if args.predictive_cost_prior or args.deadline_aware_prior:
@@ -361,7 +361,9 @@ def main():
         device='cuda' if torch.cuda.is_available() else 'cpu'
         torch.manual_seed(args.seed)
         agent_cls=JointPPOAgent if args.algorithm=='ppo' else JointRoutingAgent
-        extra=({'temperature':args.ppo_temperature} if args.algorithm=='ppo' else
+        extra=({'temperature':args.ppo_temperature,'candidate_features':not separate,
+                'include_route_costs':bool(args.resource_cost_weight or args.data_cost_weight or args.average_resource_budget)}
+               if args.algorithm=='ppo' else
                {'train_codec':not separate,'candidate_features':not separate,
                 'include_route_costs':bool(args.resource_cost_weight or args.data_cost_weight or args.average_resource_budget)})
         agent=agent_cls(len(state),len(example.node_ids),codec,reward_scale,
@@ -372,6 +374,8 @@ def main():
         agent.route_cost_state=bool(args.resource_cost_weight or args.data_cost_weight)
         agent.route_cost_state=agent.route_cost_state or bool(args.average_resource_budget)
         agent.global_return=bool(args.average_resource_budget)
+        if args.algorithm=='ppo':
+            agent.online.global_value=agent.target.global_value=bool(args.average_resource_budget)
         agent.budget_state=bool(args.average_resource_budget)
         agent.return_time_ms=args.return_time_ms
         matching=False
@@ -379,14 +383,18 @@ def main():
             checkpoint=torch.load(args.joint_init,map_location=device,weights_only=True)
             matching=checkpoint.get('manifest',{}).get('algorithm','dqn')==args.algorithm
             if not args.fresh_q and (matching or args.ppo_warm_start):
-                agent.online.load_state_dict(checkpoint['online'])
-                agent.target.load_state_dict(checkpoint['target'])
+                for network,key in ((agent.online,'online'),(agent.target,'target')):
+                    warm_actor=args.algorithm=='ppo' and args.ppo_warm_start and not matching
+                    loaded=network.load_state_dict(checkpoint[key],strict=not warm_actor)
+                    if warm_actor and (loaded.unexpected_keys or
+                            set(loaded.missing_keys)-{'latent_norm.weight','latent_norm.bias'}):
+                        raise ValueError('PPO warm-start requires compatible candidate-network weights')
             codec.load_state_dict(checkpoint['codec'])
             agent.target_codec.load_state_dict(checkpoint['target_codec'])
             manifest['joint_init_sha256']=hashlib.sha256(args.joint_init.read_bytes()).hexdigest()
             manifest['joint_init_note']='prior joint codec; fresh decision network' if args.fresh_q or not matching else 'continue prior joint model; fresh optimizer'
-            if args.ppo_warm_start:
-                manifest['joint_init_note']='joint codec and actor warm-started from trained DQN; same initial masked routing argmax'
+            if args.ppo_warm_start and not args.fresh_q:
+                manifest['joint_init_note']='joint codec and compatible candidate actor weights warm-started; PPO adds per-node latent normalization'
         manifest['q_parameterization']=('state value + unrestricted shared learned candidate advantage'
             if not separate and args.algorithm=='dqn' else 'state value + unrestricted learned action advantage')
         if not separate and args.algorithm=='dqn':
@@ -437,6 +445,13 @@ def main():
                 if learned else 'no Q network; fixed heuristic policy'),
             state_fields=[*manifest['state_fields'],'log1p_cost_virtual_queue_divided_by_V'])
         manifest.pop('route_cost_priority',None)
+        if learned and args.algorithm=='ppo':
+            manifest.pop('q_parameterization',None)
+            manifest.update(critic='unbounded system value; smooth-L1 return regression',
+                training='clipped PPO + 0.5 system value smooth-L1 - 0.001 entropy + weighted forecast/budget',
+                trajectory_return='chronological system settlements; physical-time GAE',
+                gae_time_ms=args.return_time_ms/4.,
+                policy_parameterization='shared learned candidate logits / temperature; per-node latent LayerNorm; no fixed action prior')
     write('manifest.json',manifest)
     print('START',args.bench,json.dumps(manifest),flush=True)
     if learned:
